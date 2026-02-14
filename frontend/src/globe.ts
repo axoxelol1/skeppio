@@ -30,9 +30,11 @@ export function setup() {
   const settings = {
     rotationSpeed: 0,
     shipCount: 0,
+    status: "Connecting...",
   };
   gui.add(settings, "rotationSpeed", 0, 1, 0.01);
   gui.add(settings, "shipCount").listen().disable();
+  gui.add(settings, "status").listen().disable();
 
   const canvas = document.querySelector("canvas.webgl") as Element;
 
@@ -127,36 +129,74 @@ export function setup() {
 
   const shipIndexMap: Map<string, number> = new Map();
 
-  //TODO: Error handling, hostname -> config
-  let socket = new WebSocket(`ws://${window.location.hostname}:8080/ws`);
-  socket.addEventListener("message", (event) => {
-    let { name, latitude, longitude } = JSON.parse(event.data);
-    name = name.trim();
+  const ws_url = import.meta.env.PROD
+    ? `wss://${window.location.hostname}/ws`
+    : `ws://${window.location.hostname}:8080/ws`;
+  let socket: WebSocket | null = null;
+  let reconnectTimeout: number | null = null;
 
-    if (!shipIndexMap.has(name)) {
-      if (settings.shipCount >= maxShips) return;
-
-      shipIndexMap.set(name, settings.shipCount);
-
-      shipColors[settings.shipCount * 3] = Math.random();
-      shipColors[settings.shipCount * 3 + 1] = Math.random();
-      shipColors[settings.shipCount * 3 + 2] = Math.random();
-
-      settings.shipCount++;
-      (shipGeometry.attributes.color as THREE.BufferAttribute).needsUpdate =
-        true;
+  function connect() {
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
     }
 
-    const index = shipIndexMap.get(name)!;
-    const pos = latLonToCartesian(latitude, longitude, globeRadius);
+    settings.status = "Connecting...";
 
-    shipPositions[index * 3] = pos.x;
-    shipPositions[index * 3 + 1] = pos.y;
-    shipPositions[index * 3 + 2] = pos.z;
+    socket = new WebSocket(ws_url);
 
-    (shipGeometry.attributes.position as THREE.BufferAttribute).needsUpdate =
-      true;
-  });
+    socket.onopen = () => {
+      settings.status = "Connected";
+      console.log("WebSocket Connected");
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        let { name, latitude, longitude } = JSON.parse(event.data);
+        name = name.trim();
+
+        if (!shipIndexMap.has(name)) {
+          if (settings.shipCount >= maxShips) return;
+          shipIndexMap.set(name, settings.shipCount);
+
+          const idx = settings.shipCount * 3;
+          shipColors[idx] = Math.random();
+          shipColors[idx + 1] = Math.random();
+          shipColors[idx + 2] = Math.random();
+
+          settings.shipCount++;
+          shipGeometry.attributes.color.needsUpdate = true;
+        }
+
+        const index = shipIndexMap.get(name)!;
+        const pos = latLonToCartesian(latitude, longitude, globeRadius);
+
+        shipPositions[index * 3] = pos.x;
+        shipPositions[index * 3 + 1] = pos.y;
+        shipPositions[index * 3 + 2] = pos.z;
+
+        shipGeometry.attributes.position.needsUpdate = true;
+      } catch (e) {
+        console.error("Failed to parse message:", e);
+      }
+    };
+
+    socket.onclose = (event) => {
+      settings.status = "Disconnected. Retrying...";
+      console.warn(`Socket closed. Reconnecting in 5...`, event.reason);
+
+      reconnectTimeout = window.setTimeout(() => {
+        connect();
+      }, 5000);
+    };
+
+    socket.onerror = (error) => {
+      settings.status = "Error occurred";
+      console.error("WebSocket error:", error);
+      socket?.close();
+    };
+  }
+  connect();
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));

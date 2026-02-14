@@ -98,10 +98,10 @@ func (c *Client) readPump() {
 	}
 }
 
-func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+func serveWs(hub *Hub, allowedOrigin string, w http.ResponseWriter, r *http.Request) {
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
-			return true // FIXME: Adjust this before deploying
+			return r.Header.Get("Origin") == allowedOrigin
 		},
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -127,6 +127,10 @@ func main() {
 	if !ok {
 		log.Fatalln("Please set AIS_API_KEY environment variable.")
 	}
+	allowedOrigin, ok := os.LookupEnv("ORIGIN")
+	if !ok {
+		log.Fatalln("Please set ORIGIN environment variable (e.g., http://localhost:3000)")
+	}
 
 	port, ok := os.LookupEnv("PORT")
 	if !ok {
@@ -137,7 +141,7 @@ func main() {
 	go hub.run()
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		serveWs(hub, w, r)
+		serveWs(hub, allowedOrigin, w, r)
 	})
 
 	go func() {
