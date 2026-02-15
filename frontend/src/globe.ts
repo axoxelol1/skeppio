@@ -130,8 +130,8 @@ export function setup() {
   const shipIndexMap: Map<string, number> = new Map();
 
   const ws_url = import.meta.env.PROD
-    ? `wss://${window.location.hostname}/ws`
-    : `ws://${window.location.hostname}:8080/ws`;
+    ? `wss://${window.location.host}/ws`
+    : `ws://localhost:8080/ws`;
   let socket: WebSocket | null = null;
   let reconnectTimeout: number | null = null;
 
